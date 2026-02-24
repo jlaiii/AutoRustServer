@@ -50,7 +50,7 @@ Edit the variables near the top of `rust_server.py` to customise your server:
 |---|---|---|
 | `SERVER_IDENTITY` | `myserver` | Server identity folder name |
 | `SERVER_HOSTNAME` | `My Rust Server` | Server name shown in the browser |
-| `SERVER_PORT` | `3005` | Game port |
+| `SERVER_PORT` | `3109` | Game port |
 | `SERVER_MAP` | `Procedural Map` | Map type |
 | `SERVER_WORLDSIZE` | `3500` | World size |
 | `SERVER_SEED` | `0` (random) | Map seed (`0` = random each wipe) |
@@ -58,6 +58,9 @@ Edit the variables near the top of `rust_server.py` to customise your server:
 | `SERVER_DESCRIPTION` | `Auto-managed Rust server` | Server description |
 | `SERVER_URL` | *(empty)* | Server website URL |
 | `SERVER_BANNER` | *(empty)* | Header image URL |
+| `SERVER_IP` | `0.0.0.0` | Bind address (all interfaces) |
+| `RCON_PASSWORD` | `changeme` | RCON password — **change this!** |
+| `RCON_WEB` | `1` | Websocket RCON (required by most panels) |
 | `RESTART_DELAY` | `15` | Seconds to wait before restarting |
 | `MAX_FAST_CRASHES` | `5` | Consecutive fast crashes before the manager gives up |
 
