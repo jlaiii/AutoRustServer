@@ -54,6 +54,62 @@ from pathlib import Path
 IS_LINUX = platform.system() != "Windows"
 
 # ──────────────────────────────────────────────
+# 1a. Logging – mirror all output to a text file
+# ──────────────────────────────────────────────
+LOG_FILE = Path(__file__).resolve().parent / "server_log.txt"
+
+
+class _TeeWriter:
+    """Write to both the original stream and a log file, adding timestamps."""
+
+    def __init__(self, original_stream, log_handle):
+        self._original = original_stream
+        self._log = log_handle
+        self._at_line_start = True
+
+    # ── helpers ──────────────────────────────
+    def _stamp(self) -> str:
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def write(self, text: str):
+        if not text:
+            return
+        # Write to console unchanged
+        self._original.write(text)
+        # Write to log with timestamps at the start of each line
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if self._at_line_start and line:
+                self._log.write(f"[{self._stamp()}] ")
+            self._log.write(line)
+            if i < len(lines) - 1:          # there was a newline
+                self._log.write("\n")
+                self._at_line_start = True
+            else:
+                self._at_line_start = (line == "")
+
+    def flush(self):
+        self._original.flush()
+        self._log.flush()
+
+    # Forward everything else to the original stream
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
+def _setup_logging():
+    """Open the log file and redirect stdout + stderr through _TeeWriter."""
+    log_handle = open(LOG_FILE, "a", encoding="utf-8", buffering=1)  # line-buffered
+    log_handle.write(f"\n{'=' * 60}\n")
+    log_handle.write(f"  Log session started: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n")
+    log_handle.write(f"{'=' * 60}\n")
+    sys.stdout = _TeeWriter(sys.__stdout__, log_handle)
+    sys.stderr = _TeeWriter(sys.__stderr__, log_handle)
+
+
+_setup_logging()
+
+# ──────────────────────────────────────────────
 # 1.  Configuration
 # ──────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -91,6 +147,7 @@ RCON_WEB           = 1                # 1 = websocket RCON (required by most pan
 
 RESTART_DELAY      = 15
 MAX_FAST_CRASHES   = 5
+MAX_TOTAL_CRASHES  = 3               # stop after this many consecutive non-zero exits (any uptime)
 
 # ──────────────────────────────────────────────
 # 2.  DepotDownloader helpers
@@ -332,6 +389,7 @@ def main():
     write_server_cfg()
 
     consecutive_fast_crashes = 0
+    consecutive_crashes = 0           # counts ANY non-zero exit
 
     while not shutdown_requested:
         start_time = time.time()
@@ -347,6 +405,15 @@ def main():
         if shutdown_requested:
             break
 
+        # ── OOM / SIGKILL detection ──────────────────────────
+        if exit_code in (-9, 137):     # SIGKILL / 128+9
+            print("[MANAGER] WARNING – Server was killed (exit -9 / 137).")
+            print("[MANAGER]   This usually means the OS ran out of memory (OOM killer).")
+            print(f"[MANAGER]   Current SERVER_WORLDSIZE = {SERVER_WORLDSIZE}")
+            print("[MANAGER]   Try reducing SERVER_WORLDSIZE (e.g. 2500-3000) or")
+            print("[MANAGER]   adding more RAM to the host.")
+
+        # ── Fast-crash counter (< 60 s uptime) ──────────────
         if elapsed < 60:
             consecutive_fast_crashes += 1
             print(f"[MANAGER] Fast crash detected ({consecutive_fast_crashes}/{MAX_FAST_CRASHES})")
@@ -356,6 +423,17 @@ def main():
                 sys.exit(1)
         else:
             consecutive_fast_crashes = 0
+
+        # ── Total consecutive crash counter (any uptime) ────
+        if exit_code != 0:
+            consecutive_crashes += 1
+            print(f"[MANAGER] Consecutive crash #{consecutive_crashes}/{MAX_TOTAL_CRASHES}")
+            if consecutive_crashes >= MAX_TOTAL_CRASHES:
+                print(f"[MANAGER] FATAL – Server crashed {MAX_TOTAL_CRASHES} times in a row. Stopping.")
+                print("[MANAGER] Check the server log and system memory before restarting.")
+                sys.exit(1)
+        else:
+            consecutive_crashes = 0     # clean exit (code 0) resets the counter
 
         print(f"[MANAGER] Restarting in {RESTART_DELAY}s – checking for updates first …\n")
         time.sleep(RESTART_DELAY)
