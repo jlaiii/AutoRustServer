@@ -158,16 +158,21 @@ def try_get_public_ip() -> str | None:
 
 
 def download_paper_fallback(dest: str) -> None:
-    # Try PaperMC API then fallback to GitHub releases latest
-    try:
-        api = "https://papermc.io/api/v2/projects/paper"
-        req = Request(api, headers={"User-Agent": "mc_auto/1.0"})
-        with urlopen(req, timeout=10) as r:
-            data = json.load(r)
-            versions = data.get("versions") or []
-            version = versions[-1] if versions else "1.20.4"
-    except Exception:
-        version = "1.20.4"
+    # Prefer PaperMC API to resolve version/build. Allow override via PAPER_VERSION.
+    # If API download fails, try SERVER_JAR_FALLBACK_URL env var, then the known Paper 1.21.11 URL.
+    env_ver = os.environ.get("PAPER_VERSION")
+    if env_ver:
+        version = env_ver
+    else:
+        try:
+            api = "https://papermc.io/api/v2/projects/paper"
+            req = Request(api, headers={"User-Agent": "mc_auto/1.0"})
+            with urlopen(req, timeout=10) as r:
+                data = json.load(r)
+                versions = data.get("versions") or []
+                version = versions[-1] if versions else "1.21.11"
+        except Exception:
+            version = "1.21.11"
 
     try:
         builds_url = f"https://papermc.io/api/v2/projects/paper/versions/{version}"
@@ -175,17 +180,23 @@ def download_paper_fallback(dest: str) -> None:
         with urlopen(req, timeout=10) as r:
             data = json.load(r)
             builds = data.get("builds") or []
-            if builds:
-                build = builds[-1]
-                jar_url = f"https://papermc.io/api/v2/projects/paper/versions/{version}/builds/{build}/downloads/paper-{version}-{build}.jar"
-                download_stream(jar_url, dest)
-                return
-    except Exception:
-        pass
-
-    # fallback
-    fallback = "https://github.com/PaperMC/Paper/releases/latest/download/paper.jar"
-    download_stream(fallback, dest)
+            if not builds:
+                raise RuntimeError(f"No builds found for Paper version {version}")
+            build = builds[-1]
+            jar_url = f"https://papermc.io/api/v2/projects/paper/versions/{version}/builds/{build}/downloads/paper-{version}-{build}.jar"
+            download_stream(jar_url, dest)
+            return
+    except Exception as ex:
+        # Try explicit fallback provided by panel/user
+        fallback_env = os.environ.get("SERVER_JAR_FALLBACK_URL")
+        if fallback_env:
+            eprint(f"PaperMC API download failed ({ex}); attempting SERVER_JAR_FALLBACK_URL={fallback_env}")
+            download_stream(fallback_env, dest)
+            return
+        # Known working Paper 1.21.11 artifact (provided by user)
+        known_12111 = "https://fill-data.papermc.io/v1/objects/ec5a877eb5f01372cb23665595913f3593e3c746dfcf125d34f6f0ba69acb4d1/paper-1.21.11-125.jar"
+        eprint(f"PaperMC API download failed ({ex}); attempting known fallback for 1.21.11")
+        download_stream(known_12111, dest)
 
 
 def main(argv: list[str]) -> int:
